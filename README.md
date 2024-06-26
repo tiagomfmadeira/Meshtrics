@@ -1,6 +1,12 @@
+<!-- PROJECT SHIELDS -->
+[![Python 3.6](https://img.shields.io/badge/python-3.9-blue.svg)](https://www.python.org/downloads/release/python-390/)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![stability-experimental](https://img.shields.io/badge/stability-experimental-orange.svg)](https://github.com/emersion/stability-badges#experimental)
+
+<!-- PROJECT LOGO -->
 <p align="center">
 <img src="https://github.com/tiagomfmadeira/Meshtrics/blob/main/meshtrics_logo.png">
-Metrics for textured mesh comparison and quality evaluation
+Quality Assessment of Textured 3D Meshes
 </p>
 
 # Test scripts
