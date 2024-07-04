@@ -16,6 +16,7 @@ import open3d as o3d
 import open3d.visualization.gui as gui
 import open3d.visualization.rendering as rendering
 import trimesh
+import time
 
 from Meshtrics.photometric_metrics import sim_view_point, solve_pnp
 
@@ -278,10 +279,29 @@ class AppWindow:
         self.selecting_polygon = False
         self.model = None
 
-        self.colors = iter([plt.cm.tab10(i) for i in range(10)])
+        self.colors = plt.cm.tab10.colors
+        self.color_idx = 0
 
         self._scene.set_on_mouse(self._on_mouse_widget3d)
         self._scene.set_on_key(self._on_key_widget3d)
+
+        frame = self._scene.frame
+        fovy = math.radians(60)
+        f = frame.height / (2 * math.tan(fovy / 2))
+        cx = frame.width / 2
+        cy = frame.height / 2
+        self.o3d_intrinsics = o3d.camera.PinholeCameraIntrinsic(frame.width, frame.height, f, f, cx, cy)
+
+        o3d_extrinsics = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+        bounds = self._scene.scene.bounding_box
+        self._scene.setup_camera(self.o3d_intrinsics, o3d_extrinsics, bounds)
+        self.K = np.zeros((3, 3))
+        self.K[2, 2] = 1
+        self.K[0, 0] = f
+        self.K[1, 1] = f
+        self.K[0, 2] = cx
+        self.K[1, 2] = cy
+        self._scene.scene.camera.set_projection(self.K, 0.2, 1000, frame.width, frame.height)
 
         # ---- Settings panel ----
         # Rather than specifying sizes in pixels, which may vary in size based
@@ -392,13 +412,13 @@ class AppWindow:
 
         self._ref_instuct = gui.Vert(0.25 * em, gui.Margins(0.75 * em, 0.75 * em, 0.75 * em, 0.75 * em))
 
-        ref_title = gui.Label("Select 2D-3D correspondences")
+        ref_title = gui.Label("Reference registration")
         ref_title.font_id = self.title_font
         self._ref_instuct.add_child(ref_title)
 
-        ref_label = gui.Label("Please import groudtruth photos and"
-                              "\nuse ctrl+click to choose corresponding"
-                              "\npoints between them.")
+        ref_label = gui.Label("Please \"import\" groudtruth photos and"
+                              "\nmanually adjust the camera to initial"
+                              "\nposition, then click \"refine\".")
         self._ref_instuct.add_child(ref_label)
 
         self._import_image_button = gui.Button("Import")
@@ -824,6 +844,28 @@ class AppWindow:
 
         # width = 17 * layout_context.theme.font_size
 
+        frame = self._scene.frame
+        fovy = math.radians(60)
+        f = frame.height / (2 * math.tan(fovy / 2))
+        cx = frame.width / 2
+        cy = frame.height / 2
+        self.o3d_intrinsics = o3d.camera.PinholeCameraIntrinsic(frame.width, frame.height, f, f, cx, cy)
+
+        cam_matrix = self._scene.scene.camera.get_view_matrix()
+        cam_matrix[1, :] = -cam_matrix[1, :]
+        cam_matrix[2, :] = -cam_matrix[2, :]
+
+        bounds = self._scene.scene.bounding_box
+        self._scene.setup_camera(self.o3d_intrinsics, cam_matrix, bounds)
+        self.K = np.zeros((3, 3))
+        self.K[2, 2] = 1
+        self.K[0, 0] = f
+        self.K[1, 1] = f
+        self.K[0, 2] = cx
+        self.K[1, 2] = cy
+        self._scene.scene.camera.set_projection(self.K, 0.2, 1000, frame.width, frame.height)
+
+
         ###############################
         ## metrics
         preferred_height = self._tools_panel.calc_preferred_size(
@@ -1058,11 +1100,19 @@ class AppWindow:
         cam_matrix = self._scene.scene.camera.get_view_matrix()
         cam_matrix = np.linalg.inv(cam_matrix)
 
-        print(cam_matrix)
+        cam_matrix[3,:] = [0, 0, 0, 1]
 
+        width = original_photo.shape[1]
+        height = original_photo.shape[0]
+        K = np.zeros((3, 3))
+        K[2, 2] = 1
+        K[0, 0] = height/2
+        K[1, 1] = height/2
+        K[0, 2] = width/2
+        K[1, 2] = height/2
         est_color, est_depth = sim_view_point(self.trimesh, cam_matrix,
-                                              self.K,
-                                              original_photo.shape[1], original_photo.shape[0])
+                                              K,
+                                              width, height)
 
         print("Finding matching features between photo and generated viewpoint...")
         query_img = cv2.cvtColor(original_photo[:, :, :3], cv2.COLOR_BGR2GRAY)
@@ -1090,17 +1140,17 @@ class AppWindow:
             if m.distance < ratio_thresh * n.distance:
                 good_matches.append(m)
 
-        # img_matches = np.empty(
-        #     (max(query_img.shape[0], train_img.shape[0]), query_img.shape[1] + train_img.shape[1], 3),
-        #     dtype=np.uint8)
-        # cv2.drawMatches(query_img, query_keypoints, cv2.cvtColor(train_img, cv2.COLOR_RGB2BGR),
-        #                 train_keypoints, good_matches, img_matches,
-        #                 flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
-        # cv2.namedWindow('Good Matches', cv2.WINDOW_NORMAL)
-        # cv2.setWindowProperty('Good Matches', cv2.WINDOW_FULLSCREEN, 1)
-        # cv2.imshow('Good Matches', img_matches)
-        # cv2.waitKey()
-        # cv2.destroyAllWindows()
+        img_matches = np.empty(
+            (max(query_img.shape[0], train_img.shape[0]), query_img.shape[1] + train_img.shape[1], 3),
+            dtype=np.uint8)
+        cv2.drawMatches(query_img, query_keypoints, cv2.cvtColor(train_img, cv2.COLOR_RGB2BGR),
+                        train_keypoints, good_matches, img_matches,
+                        flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+        cv2.namedWindow('Good Matches', cv2.WINDOW_NORMAL)
+        cv2.setWindowProperty('Good Matches', cv2.WINDOW_FULLSCREEN, 1)
+        cv2.imshow('Good Matches', img_matches)
+        cv2.waitKey()
+        cv2.destroyAllWindows()
 
         model_points = []
         photo_pixels = []
@@ -1119,7 +1169,7 @@ class AppWindow:
             matrix[2, :] = -matrix[2, :]
             matrix = np.linalg.inv(matrix)
 
-            point_pos = unproject_point([x, y], depth, self.o3d_intrinsics.intrinsic_matrix, matrix)
+            point_pos = unproject_point([x, y], depth, K, matrix)
 
             model_points.append(point_pos)
             # To use OpenCV's SolvePnP the col and row must be switched
@@ -1257,6 +1307,7 @@ class AppWindow:
         def update_animation(self):
             self.i = 1
             while self._loading_image.visible:
+                time.sleep(0.1)
                 if self.frame_ready:
                     self.frame_ready = False
                     gui.Application.instance.post_to_main_thread(self.window, self.draw_loading)
@@ -1320,17 +1371,26 @@ class AppWindow:
 
         if geometry is not None:
             # Setup camera
-            bounds = self._scene.scene.bounding_box
-            self._scene.setup_camera(60, bounds, bounds.get_center())
+            # bounds = self._scene.scene.bounding_box
+            # self._scene.setup_camera(60, bounds, bounds.get_center())
+
             frame = self._scene.frame
             fovy = math.radians(60)
             f = frame.height / (2 * math.tan(fovy / 2))
             cx = frame.width / 2
             cy = frame.height / 2
             self.o3d_intrinsics = o3d.camera.PinholeCameraIntrinsic(frame.width, frame.height, f, f, cx, cy)
-            # o3d_extrinsics = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
-            # bounds = self._scene.scene.bounding_box
-            # self._scene.setup_camera(self.o3d_intrinsics, o3d_extrinsics, bounds)
+
+            o3d_extrinsics = np.array([[0, 1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+            bounds = self._scene.scene.bounding_box
+            self._scene.setup_camera(self.o3d_intrinsics, o3d_extrinsics, bounds)
+            self.K = np.zeros((3, 3))
+            self.K[2, 2] = 1
+            self.K[0, 0] = f
+            self.K[1, 1] = f
+            self.K[0, 2] = cx
+            self.K[1, 2] = cy
+            self._scene.scene.camera.set_projection(self.K, 0.2, 1000, frame.width, frame.height)
 
         self.trimesh = trimesh.load(path)
 
@@ -1393,39 +1453,18 @@ class AppWindow:
                                            o3d.geometry.Image(self._current_2Dbackground))
         self._image2D.set_on_mouse(self._on_mouse_image2d)
 
-        # get camera intrinsics for reference photos from txt file or use default
-        intrinsics_path = os.path.join(self._photos_dir, 'intrinsics.txt')
-
-        if os.path.exists(intrinsics_path):
-            with open(intrinsics_path, 'r') as f:
-                self.K = np.array([[float(num) for num in line.split()] for line in f])[:3, :3]
+        # # get camera intrinsics for reference photos from txt file or use default
+        # intrinsics_path = os.path.join(self._photos_dir, 'intrinsics.txt')
+        # if os.path.exists(intrinsics_path):
+        #     with open(intrinsics_path, 'r') as f:
+        #         self.K = np.array([[float(num) for num in line.split()] for line in f])[:3, :3]
             
-            self.o3d_intrinsics = o3d.camera.PinholeCameraIntrinsic(
-                width=self._current_2Dbackground.shape[1],
-                height=self._current_2Dbackground.shape[0],
-                fx=self.K[0, 0], fy=self.K[1, 1],
-                cx=self.K[0, 2], cy=self.K[1, 2]
-            )
-
-        else:
-            # Create a PinholeCameraIntrinsic with default parameters (60 FOV camera)
-            width = self._current_2Dbackground.shape[1]
-            height = self._current_2Dbackground.shape[0]
-            fov = 60  # Field of View in degrees
-            focal_length = (width / 2) / np.tan(np.radians(fov / 2))
-
-            self.K = np.array([
-                [focal_length, 0, width / 2],
-                [0, focal_length, height / 2],
-                [0, 0, 1]
-            ])
-            
-            self.o3d_intrinsics = o3d.camera.PinholeCameraIntrinsic(
-                width=width,
-                height=height,
-                fx=self.K[0, 0], fy=self.K[1, 1],
-                cx=self.K[0, 2], cy=self.K[1, 2]
-            )
+        #     self.o3d_intrinsics = o3d.camera.PinholeCameraIntrinsic(
+        #         width=self._current_2Dbackground.shape[1],
+        #         height=self._current_2Dbackground.shape[0],
+        #         fx=self.K[0, 0], fy=self.K[1, 1],
+        #         cx=self.K[0, 2], cy=self.K[1, 2]
+        #     )
 
 
         # extrinsics
@@ -1436,8 +1475,8 @@ class AppWindow:
             cam_matrix[1, :] = -cam_matrix[1, :]
             cam_matrix[2, :] = -cam_matrix[2, :]
 
-        bounds = self._scene.scene.bounding_box
-        self._scene.setup_camera(self.o3d_intrinsics, cam_matrix, bounds)
+        # bounds = self._scene.scene.bounding_box
+        # self._scene.setup_camera(self.o3d_intrinsics, cam_matrix, bounds)
 
         self.window.set_needs_layout()
 
@@ -1449,6 +1488,9 @@ class AppWindow:
             if event.type == gui.KeyEvent.UP:
 
                 def mask_callback(depth_image):
+
+                    # reset point colors
+                    self.color_idx = 0
 
                     if self.selecting_polygon:
                         self.selecting_polygon = False
@@ -1528,8 +1570,8 @@ class AppWindow:
 
             if len(self.picked_points_2D) > 0:
                 for idx, point in enumerate(self.picked_points_2D):
-                    color = [c * 255 for c in plt.cm.tab10(idx % 11)[:3]]
-                    cv2.circle(tmp_img, point, 10, color, -1)
+                    color = np.array(plt.cm.tab10.colors[idx % 10][:3]) * 1.6 * 255 
+                    cv2.circle(tmp_img, point, 15, color, -1)
 
             self._image2D.scene.set_background([45 / 255, 45 / 255, 45 / 255, 1.0],
                                                o3d.geometry.Image(tmp_img))
@@ -1544,9 +1586,18 @@ class AppWindow:
             def depth_callback(depth_image):
                 x = event.x - self._scene.frame.x
                 y = event.y - self._scene.frame.y
+
                 depth = np.asarray(depth_image)[y, x]
 
                 if depth != 1.0:  # clicked on nothing (i.e. the far plane)
+
+                    frame = self._scene.frame
+                    fovy = math.radians(60)
+                    f = frame.height / (2 * math.tan(fovy / 2))
+                    cx = frame.width / 2
+                    cy = frame.height / 2
+
+                    self.o3d_intrinsics = o3d.camera.PinholeCameraIntrinsic(frame.width, frame.height, f, f, cx, cy)
 
                     matrix = np.array(self._scene.scene.camera.get_view_matrix())
                     matrix[1, :] = -matrix[1, :]
@@ -1562,8 +1613,10 @@ class AppWindow:
                     # distance, vertex_id = mesh.nearest.vertex([depth])
                     # point_pos = mesh.vertices[vertex_id][0]
 
-                    tmp_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.008)
-                    tmp_sphere.paint_uniform_color(next(self.colors)[:3])
+                    tmp_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=self._scene.scene.bounding_box.get_max_extent()/150)
+                    tmp_sphere.compute_triangle_normals()
+                    tmp_sphere.paint_uniform_color(self.colors[self.color_idx][:3])
+                    self.color_idx = (self.color_idx + 1) % len(self.colors)
                     tmp_sphere.translate(point_pos)
                     self._scene.scene.add_geometry(str(point_pos), tmp_sphere, self.settings.material)
 

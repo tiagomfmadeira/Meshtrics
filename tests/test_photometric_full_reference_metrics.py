@@ -43,14 +43,21 @@ def click_event(event, x, y, flags, param):
             print("[OpenCV INFO] Removed picked point (" + str(point[0]) + ", " + str(point[1]) + ") from pick queue.")
 
 
-def pick_points(pcd):
-    print("\n1) Please pick at least 3 points using [shift + left click].")
+def pick_points(mesh):
+    print("\n1) Please pick at least 4 points using [shift + left click].")
     print("   Press [shift + right click] to undo point picking.")
     print("2) After picking points, press q to close the window.\n")
+
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = mesh.vertices
+    pcd.colors = mesh.vertex_colors
+    pcd.normals = mesh.vertex_normals
+
     vis = o3d.visualization.VisualizerWithEditing()
     vis.create_window()
     vis.add_geometry(pcd)
-    vis.run()  # user picks points
+    vis.add_geometry(mesh)
+    vis.run()
     vis.destroy_window()
     return vis.get_picked_points()
 
@@ -84,7 +91,11 @@ if __name__ == "__main__":
     print("\nLoading input mesh...")
     mesh = trimesh.load(args['input_mesh'])
 
-    o3d_mesh = o3d.io.read_triangle_mesh(args['input_mesh'])
+    o3d_mesh = o3d.io.read_triangle_mesh(args['input_mesh'], True)
+    new_textures = o3d_mesh.textures
+    new_textures[-1] = new_textures[0]
+    o3d_mesh.textures = new_textures
+
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d_mesh.vertices
     pcd.colors = o3d_mesh.vertex_colors
@@ -131,7 +142,7 @@ if __name__ == "__main__":
                 cv2.imshow("photo", img)
                 cv2.setMouseCallback("photo", click_event)
 
-                model_selected_points_idx = pick_points(pcd)
+                model_selected_points_idx = pick_points(o3d_mesh)
                 model_selected_points = [pcd.points[idx].tolist() for idx in model_selected_points_idx]
 
                 cv2.destroyAllWindows()
@@ -169,6 +180,11 @@ if __name__ == "__main__":
                     query_img = cv2.cvtColor(original_photo[:, :, :3], cv2.COLOR_BGR2GRAY)
                     train_img = cv2.cvtColor(est_color[:, :, :3], cv2.COLOR_BGR2GRAY)
 
+                    # cv2.imshow("query", query_img)
+                    # cv2.imshow("train", train_img)
+                    # cv2.waitKey()
+                    # cv2.destroyAllWindows()
+
                     # detector = cv2.ORB_create(edgeThreshold=31, patchSize=31, fastThreshold=1000)
                     # detector = cv2.xfeatures2d.SURF_create(hessianThreshold=100)
                     detector = cv2.SIFT_create(nOctaveLayers=6, contrastThreshold=0.01, edgeThreshold=30, sigma=0.8)
@@ -180,7 +196,7 @@ if __name__ == "__main__":
                     knn_matches = matcher.knnMatch(query_descriptors, train_descriptors, 2)
 
                     # Filter matches using the Lowe's ratio test
-                    ratio_thresh = 0.6
+                    ratio_thresh = 0.5
                     good_matches = []
                     for m, n in knn_matches:
                         if m.distance < ratio_thresh * n.distance:
