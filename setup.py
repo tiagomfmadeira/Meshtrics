@@ -18,7 +18,8 @@ setup(
         'scikit-image',
         'scipy',
         'seaborn',
-        'argparse'
+        'argparse',
+        'pye57'
     ],
     author = "Tiago Madeira",
     author_email = "tiagomadeira@ua.pt",
