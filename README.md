@@ -6,8 +6,7 @@
 <!-- PROJECT LOGO -->
 <p align="center">
 <img src="https://github.com/tiagomfmadeira/Meshtrics/blob/main/meshtrics_logo.png">
-Quality Assessment of Textured 3D Meshes
-</p>
+Objective Quality Assessment of Textured 3D Meshes for 3D Reconstruction</p>
 
 # Test scripts
 
